@@ -1,0 +1,25 @@
+{
+  "name": "poll-pool",
+  "version": "0.1.0",
+  "description": "A simple utility for managing a pool of resources (e.g. servers) polling against a service and conserving work",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "keywords": [
+    "node.js",
+    "websockets",
+    "mubsub",
+    "mongodb",
+    "realtime"
+  ],
+  "author": "Max Metral",
+  "license": "MIT",
+  "dependencies": {
+    "mubsub": "^1.0.4"
+  },
+  "devDependencies": {
+    "longjohn": "^0.2.4",
+    "mocha": "^2.1.0"
+  }
+}
