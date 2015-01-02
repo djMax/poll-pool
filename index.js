@@ -35,6 +35,14 @@ var PollPool = function (config) {
         console.log('Poll key claimed.', message);
     });
 
+    this.channel.on('ran', function (message) {
+        console.log('Job ran', message);
+    });
+
+    this.channel.on('done', function (message) {
+       console.log('Job is done', message);
+    });
+
     this.channel.on('ready', function () {
         self.subscribed = true;
         console.log('poll-pool agent ' + self.agentName + ' connected to MongoDB using collection ' + self.collection || 'poll-pool');
