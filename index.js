@@ -1,5 +1,6 @@
 var mubsub = require('mubsub'),
-    os = require('os');
+    os = require('os'),
+    debuglog = require('debuglog')('poll-pool');
 
 /**
  * A PollPool will use a centralized MongoDB collection to coordinate periodically polling a
@@ -7,7 +8,7 @@ var mubsub = require('mubsub'),
  * as "active workers" are received as they occur and thus at process startup, existing workers
  * will be missed.
  */
-var PollPool = function (config) {
+var PollPool = function (config, cb) {
 
     function getClient() {
         if (config.url) {
@@ -24,28 +25,56 @@ var PollPool = function (config) {
     var client = getClient();
     this.collection = config.collection || 'poll-pool';
     this.channel = client.channel(this.collection, config.mubsub);
-    this.agentName = config.agentName || (os.hostname() + process.pid);
+    this.agentName = config.agentName || (os.hostname() + ':' + process.pid);
     this.jobs = {};
 
+    /*
     this.channel.on('message', function (message) {
-        console.log('Message received.', message);
+        console.log(self.agentName + ': Message received.', message);
+    });
+    */
+
+    this.channel.subscribe('claimKey', function (message) {
+        var info = self.jobs[message.key];
+        if (!info) {
+            debuglog(self.agentName, 'Aware of claim.', message);
+            self.jobs[message.key] = {
+                locals: [],
+                key: message.key,
+                pollers: [message.agentName]
+            };
+        }
     });
 
-    this.channel.on('claimKey', function (message) {
-        console.log('Poll key claimed.', message);
+    this.channel.subscribe('ran', function (message) {
+        var info = self.jobs[message.key];
+        if (info && info.locals) {
+            info.locals.forEach(function (cbInfo) {
+                if (cbInfo.options.progressCallback) {
+                    cbInfo.options.progressCallback(null, message);
+                }
+            });
+        }
     });
 
-    this.channel.on('ran', function (message) {
-        console.log('Job ran', message);
-    });
-
-    this.channel.on('done', function (message) {
-       console.log('Job is done', message);
+    this.channel.subscribe('done', function (message) {
+        debuglog(self.agentName, 'job is done', message);
+        var info = self.jobs[message.key];
+        if (info && info.locals) {
+            var cbs = info.locals;
+            delete self.jobs[message.key];
+            cbs.forEach(function (cbInfo) {
+                cbInfo.callback(null, message);
+            });
+        }
     });
 
     this.channel.on('ready', function () {
         self.subscribed = true;
-        console.log('poll-pool agent ' + self.agentName + ' connected to MongoDB using collection ' + self.collection || 'poll-pool');
+        debuglog(self.agentName, 'poll-pool connected to MongoDB using collection', self.collection || 'poll-pool');
+        if (cb) {
+            cb();
+        }
     });
 
 };
@@ -62,7 +91,9 @@ var PollPool = function (config) {
  *          An object - notify all listeners with the result property and stop polling locally if no 'next' property is present.
  *             If the 'next' property is present, we'll run again in 'next' milliseconds. As a convenience, you can also just
  *             return a number to simulate returning {next:n}
- *  callback: A function to be called when polling completes (either via timeout or actual completion)
+ *  progressCallback: called after a polling run
+ *  claimedCallback: called when the polling job claim has been sent to Mongo and our call is the active poller
+ *  @param callback A function to be called when polling completes (either via timeout or actual completion)
  */
 PollPool.prototype.startPolling = function (options, callback) {
     // TODO what if we stop polling while someone else would like to continue... Need to "pick up" the polling
@@ -80,7 +111,11 @@ PollPool.prototype.startPolling = function (options, callback) {
             key: options.key,
             pollers: [this.agentName]
         };
-        this.channel.publish('claimKey', {key:options.key});
+        this.channel.publish('claimKey', {key:options.key,agentName:this.agentName}, function claimCallback(err) {
+            if (options.claimedCallback) {
+                options.claimedCallback(err);
+            }
+        });
     }
     var pollPool = this;
     info.locals.push({options:options,callback:callback});
@@ -92,16 +127,24 @@ PollPool.prototype.startPolling = function (options, callback) {
                 if (typeof(pollResult) === 'number') {
                     pollResult = {next:pollResult};
                 }
-                console.log(pollResult);
-                pollPool.channel.publish('ran', {key: options.key, result: pollResult});
+                debuglog('Poll execution',runIndex,'result:', pollResult);
+                var eventDetails = {key: options.key, result: pollResult, time: new Date().getTime()};
                 if (pollResult.next) {
+                    pollPool.channel.publish('ran', eventDetails, function claimCallback(err) {
+                        if (options.progressCallback) {
+                            options.progressCallback(err, eventDetails);
+                        }
+                    });
                     setTimeout(pollExecutor, pollResult.next);
                 } else {
-                    pollPool.channel.publish('done', {key: options.key});
+                    pollPool.channel.publish('done', eventDetails, function claimCallback(err) {
+                    });
                 }
             });
         };
         process.nextTick(pollExecutor);
+    } else {
+        debuglog(this.agentName,'using results from',info.pollers[0]);
     }
 };
 

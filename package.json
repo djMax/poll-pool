@@ -16,9 +16,11 @@
   "author": "Max Metral",
   "license": "MIT",
   "dependencies": {
+    "debuglog": "^1.0.1",
     "mubsub": "^1.0.4"
   },
   "devDependencies": {
+    "async": "^0.9.0",
     "longjohn": "^0.2.4",
     "mocha": "^2.1.0"
   }
