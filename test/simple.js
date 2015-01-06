@@ -72,4 +72,18 @@ describe('poll-pool', function () {
             done();
         });
     });
+
+    it('should fail a job properly', function (done) {
+       poller2.startPolling({
+           key: 'failjob',
+           durationSeconds: 10,
+           poller: function errorPoller(options, ix, doneFunction) {
+               doneFunction(new Error('testing'),{foo:1});
+           }
+       }, function (e, r) {
+           assert(e && e.message === 'testing');
+           assert(r.foo === 1);
+           done();
+       });
+    });
 });

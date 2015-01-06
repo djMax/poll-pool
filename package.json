@@ -1,6 +1,6 @@
 {
   "name": "poll-pool",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A simple utility for managing a pool of resources (e.g. servers) polling against a service and conserving work",
   "main": "index.js",
   "scripts": {

@@ -29,10 +29,10 @@ var PollPool = function (config, cb) {
     this.jobs = {};
 
     /*
-    this.channel.on('message', function (message) {
-        console.log(self.agentName + ': Message received.', message);
-    });
-    */
+     this.channel.on('message', function (message) {
+     console.log(self.agentName + ': Message received.', message);
+     });
+     */
 
     this.channel.subscribe('claimKey', function (message) {
         var info = self.jobs[message.key];
@@ -65,6 +65,18 @@ var PollPool = function (config, cb) {
             delete self.jobs[message.key];
             cbs.forEach(function (cbInfo) {
                 cbInfo.callback(null, message);
+            });
+        }
+    });
+
+    this.channel.subscribe('failed', function (message) {
+        debuglog(self.agentName, 'job failed', message);
+        var info = self.jobs[message.key];
+        if (info && info.locals) {
+            var cbs = info.locals;
+            delete self.jobs[message.key];
+            cbs.forEach(function (cbInfo) {
+                cbInfo.callback(message.error, message.result);
             });
         }
     });
@@ -111,23 +123,33 @@ PollPool.prototype.startPolling = function (options, callback) {
             key: options.key,
             pollers: [this.agentName]
         };
-        this.channel.publish('claimKey', {key:options.key,agentName:this.agentName}, function claimCallback(err) {
+        this.channel.publish('claimKey', {key: options.key, agentName: this.agentName}, function claimCallback(err) {
             if (options.claimedCallback) {
                 options.claimedCallback(err);
             }
         });
     }
     var pollPool = this;
-    info.locals.push({options:options,callback:callback});
+    info.locals.push({options: options, callback: callback});
     if (info.pollers[0] === this.agentName) {
         // Let's go let's go.
         var runIndex = 1;
         var pollExecutor = function () {
             options.poller(options, runIndex++, function pollerResultHandler(pollError, pollResult) {
-                if (typeof(pollResult) === 'number') {
-                    pollResult = {next:pollResult};
+                if (pollError) {
+                    debuglog('Poll execution failed', pollError);
+                    return pollPool.channel.publish('failed', {
+                        key: options.key,
+                        time: new Date().getTime(),
+                        error: {
+                            message: pollError.message,
+                            stack: pollError.stack
+                        }, result: pollResult});
                 }
-                debuglog('Poll execution',runIndex,'result:', pollResult);
+                if (typeof(pollResult) === 'number') {
+                    pollResult = {next: pollResult};
+                }
+                debuglog('Poll execution', runIndex, 'result:', pollResult);
                 var eventDetails = {key: options.key, result: pollResult, time: new Date().getTime()};
                 if (pollResult.next) {
                     pollPool.channel.publish('ran', eventDetails, function claimCallback(err) {
@@ -144,7 +166,7 @@ PollPool.prototype.startPolling = function (options, callback) {
         };
         process.nextTick(pollExecutor);
     } else {
-        debuglog(this.agentName,'using results from',info.pollers[0]);
+        debuglog(this.agentName, 'using results from', info.pollers[0]);
     }
 };
 
